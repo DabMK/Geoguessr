@@ -1,2 +1,0 @@
-C:\VS\Geoguessr\bin\Release\net7.0\publish\win-x86\Geoguessr.pdb
-C:\VS\Geoguessr\bin\Release\net7.0\publish\win-x86\Geoguessr.exe
