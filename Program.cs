@@ -35,7 +35,8 @@ namespace Geoguessr
             Console.WriteLine("6) Settings");
             Console.WriteLine("7) Locations List");
             Console.WriteLine("8) Delete Locations");
-            Console.WriteLine("9) Quit");
+            Console.WriteLine("9) Street Guesser Mode");
+            Console.WriteLine("10) Quit");
             Console.WriteLine("-------------------------------------------");
             Console.Write("\n\nYour choice: ");
             string? action = Console.ReadLine();
@@ -95,8 +96,15 @@ namespace Geoguessr
                     Console.Clear();
                     goto Start;
 
-                case "quit":
+                case "street":
                 case "9":
+                    Console.Write("- LOAD EXISTING LOCATION TO PLAY STREET MODE\n");
+                    Street.Play(ref oob);
+                    Console.Clear();
+                    goto Start;
+
+                case "quit":
+                case "10":
                     Environment.Exit(0);
                     return;
 
@@ -126,7 +134,7 @@ namespace Geoguessr
                 }
 
                 string streetURL = $"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lng}";
-                string response = Utilities.Get(streetURL, FakeAgent());
+                string response = Utilities.Get(streetURL, Utilities.FakeAgent());
 
                 JObject data = JObject.Parse(response);
                 if (data["error"] != null && data["error"].ToString() == "Unable to geocode") { Utilities.Log("Location found doesn't exist. Searching for a new location...\n", ConsoleColor.Red); continue; }
@@ -169,13 +177,13 @@ namespace Geoguessr
 
                     if (closest)
                     {
-                        lat = FixBounds(oldLat, double.Parse(boundingbox[0]), double.Parse(boundingbox[1]));
-                        lng = FixBounds(oldLng, double.Parse(boundingbox[2]), double.Parse(boundingbox[3]));
+                        lat = Utilities.FixBounds(oldLat, double.Parse(boundingbox[0]), double.Parse(boundingbox[1]));
+                        lng = Utilities.FixBounds(oldLng, double.Parse(boundingbox[2]), double.Parse(boundingbox[3]));
                     }
                     else
                     {
-                        lat = ClosestSureArea(oldLat, double.Parse(boundingbox[0]), double.Parse(boundingbox[1]), oldLng, double.Parse(boundingbox[2]), double.Parse(boundingbox[3]))[0];
-                        lng = ClosestSureArea(oldLat, double.Parse(boundingbox[0]), double.Parse(boundingbox[1]), oldLng, double.Parse(boundingbox[2]), double.Parse(boundingbox[3]))[1];
+                        lat = Utilities.ClosestSureArea(oldLat, double.Parse(boundingbox[0]), double.Parse(boundingbox[1]), oldLng, double.Parse(boundingbox[2]), double.Parse(boundingbox[3]))[0];
+                        lng = Utilities.ClosestSureArea(oldLat, double.Parse(boundingbox[0]), double.Parse(boundingbox[1]), oldLng, double.Parse(boundingbox[2]), double.Parse(boundingbox[3]))[1];
                     }
 
                     if (lat < mLat || lat > mxLat || lng < mLng || lng > mxLng)
@@ -197,7 +205,7 @@ namespace Geoguessr
                 int radius = 30;
                 string endpoint = "https://overpass-api.de/api/interpreter";
                 string query = $"[out:json][timeout:25];(way[name](around:{radius},{lat},{lng});node[name](around:{radius},{lat},{lng}););out body;>;out skel qt;";
-                string map = Utilities.Get($"{endpoint}?data={query}", FakeAgent());
+                string map = Utilities.Get($"{endpoint}?data={query}", Utilities.FakeAgent());
                 JObject mapData;
                 try { mapData = JObject.Parse(map); } catch { Utilities.Log("Server Crashed. Searching for a new location...\n", ConsoleColor.Red); continue; }
 
@@ -207,60 +215,46 @@ namespace Geoguessr
                     Utilities.Log("Street has not been explored by Google Street View. Searching for a new location...\n", ConsoleColor.Red);
                     continue;
                 }
-                int count = 0;
+                int count = -1;
                 bool ok = false;
                 while (true)
                 {
+                    count++;
                     JArray? mapArray = (JArray)mapData["elements"];
                     if (count > (mapArray.Count - 1)) { break; }
                     if (mapData["elements"][count] == null) { break; }
 
                     JToken? item = mapData["elements"][count];
-                    if (item["tags"] == null) { count++; continue; }
 
+                    // DEFAULT FILTERS
+                    if (item["tags"] == null) { continue; }
+                    if (item["type"].ToString() != "way") { continue; }
+                    if (item["tags"]["highway"] == null) { continue; }
+                    if (item["tags"]["access"] != null)
+                    {
+                        if (item["tags"]["access"].ToString() != "all" && item["tags"]["access"].ToString() != "destination")
+                        {
+                            continue;
+                        }
+                    }
+                    if (!IsRoadTypeValid(item["tags"]["highway"].ToString()))
+                    {
+                        ok = false;
+                        continue;
+                    }
+
+                    // OFFROAD FILTERS
                     if (!offroad)
                     {
-                        if ((item["tags"]["highway"] != null && item["tags"]["highway"].ToString() == "tertiary") || (item["tags"]["surface"] != null && item["tags"]["surface"].ToString() == "unpaved"))
+                        if (item["tags"]["surface"] != null && (item["tags"]["surface"].ToString() == "unpaved" || item["tags"]["surface"].ToString() == "gravel"))
                         {
                             Utilities.Log("Off-Road Location Declined.", ConsoleColor.Yellow);
                             ok = false;
-                            break;
-                        }
-                    }
-
-                    if (!mapData.ToString().Contains("addr:street"))
-                    {
-                        string[] split = item["tags"].ToString().Replace("{", "").Replace("}", "").Replace("\n", "").Replace(" ", "").Replace("\"", "").Split(',');
-                        string splitter = string.Empty;
-                        foreach (string s in split)
-                        {
-                            splitter += s.Split(':')[0] + ",";
-                        }
-                        if (splitter.Split(',').Length == 2 || splitter.Split(',').Length == 3 && (splitter.Contains("highway") && splitter.Contains("name")))
-                        {
-                            count++;
                             continue;
                         }
-
-                        // FILTERS
-                        if (item["tags"]["sac_scale"] != null || item["tags"]["trail_visibility"] != null)
-                        {
-                            count++;
-                            continue;
-                        }
-
-                        if (item["tags"] != null && item["tags"]["highway"] != null)
-                        {
-                            ok = true;
-                            break;
-                        }
                     }
-                    else
-                    {
-                        ok = true;
-                        break;
-                    }
-                    count++;
+                    ok = true;
+                    break;
                 }
 
                 if (!ok) { Utilities.Log("Elements of Street are corrupted. Searching for a new location...\n", ConsoleColor.Red); continue; }
@@ -291,63 +285,22 @@ namespace Geoguessr
         }
 
 
-        // FUNCTION TO GET THE START OR THE END OF THE ROAD (DEPENDING ON WHICH IS THE CLOSEST FROM THE WRONG LOCATION)
-        private static double[] ClosestSureArea(double num, double lower, double upper, double num2, double lower2, double upper2)
+        private static bool IsRoadTypeValid(string road)
         {
-            double[] closest = new double[2];
-            double latitude = Math.Min(Math.Abs(lower - num), Math.Abs(upper - num));
-            double longitude = Math.Min(Math.Abs(lower2 - num2), Math.Abs(upper2 - num2));
+            List<string> validRoads = new()
+            {
+                "road", "motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "living_street", "service",
+                "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"
+            };
 
-            if (longitude < latitude)
+            foreach (string validRoad in validRoads)
             {
-                if (Math.Abs(lower2 - num2) > Math.Abs(upper2 - num2))
+                if (road.Equals(validRoad, StringComparison.OrdinalIgnoreCase))
                 {
-                    closest[0] = lower;
-                    closest[1] = lower2;
-                }
-                else
-                {
-                    closest[0] = upper;
-                    closest[1] = upper2;
+                    return true;
                 }
             }
-            else
-            {
-                if (Math.Abs(lower - num) > Math.Abs(upper - num))
-                {
-                    closest[0] = lower;
-                    closest[1] = lower2;
-                }
-                else
-                {
-                    closest[0] = upper;
-                    closest[1] = upper2;
-                }
-            }
-            return closest;
-        }
-
-        // FUNCTION TO FIND THE CLOSEST AREA FROM THE WRONG ONE INSIDE OF THE BOUNDINGBOX (RANGE MAY BE BROKEN)
-        private static double FixBounds(double num, double lower, double upper)
-        {
-            if (num >= lower && num <= upper)
-            {
-                return num;
-            }
-            else
-            {
-                double distanceToA = num - lower;
-                double distanceToB = upper - num;
-
-                if (distanceToA < distanceToB)
-                {
-                    return lower;
-                }
-                else
-                {
-                    return upper;
-                }
-            }
+            return false;
         }
 
         // VIEW LOCATION DEBUG INFO
@@ -408,23 +361,6 @@ namespace Geoguessr
             Console.ForegroundColor = ConsoleColor.DarkGreen;
             Console.BackgroundColor = ConsoleColor.Black;
             Console.Clear();
-        }
-
-        // GENERATE A FAKE AGENT TO BYPASS A POSSIBLE AGENT CHECKER IN THE APIs
-        private static Dictionary<string, string> FakeAgent()
-        {
-            Random random = new();
-            string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-            string versionChars = "0123456789";
-            string? rnd = new(Enumerable.Repeat(chars, 5).Select(s => s[random.Next(s.Length)]).ToArray());
-            string? rndVersion = new(Enumerable.Repeat(versionChars, 2).Select(s => s[random.Next(s.Length)]).ToArray());
-            string? rndSubVersion = new(Enumerable.Repeat(versionChars, 8).Select(s => s[random.Next(s.Length)]).ToArray());
-            string? rndX = new(Enumerable.Repeat(versionChars, 2).Select(s => s[random.Next(s.Length)]).ToArray());
-
-            return new Dictionary<string, string>
-            {
-                { "User-Agent", $"{rnd}/{rndVersion}.{rndSubVersion} (X{rndX}; Linux x86_64)" }
-            };
         }
     }
 }
