@@ -8,6 +8,8 @@ namespace Geoguessr.Actions
 {
     internal class Street
     {
+        readonly private static StringComparison o = StringComparison.OrdinalIgnoreCase;
+
         readonly private static string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         private static string loc = string.Empty;
 
@@ -41,17 +43,19 @@ namespace Geoguessr.Actions
                 if (data["error"] != null && data["error"].ToString() == "Unable to geocode") { Utilities.Log("Location found doesn't exist. Searching for a new location...\n", ConsoleColor.Red); continue; }
                 string[] boundingbox = data["boundingbox"].ToString().Replace("\n", "").Replace("[", "").Replace("]", "").Replace("\"", "").Split(',');
 
-                if (!((lat >= double.Parse(boundingbox[0]) || lat <= double.Parse(boundingbox[1])) && (lng >= double.Parse(boundingbox[2]) || lng <= double.Parse(boundingbox[3]))))
+                if (mxLat < double.Parse(boundingbox[0]) || double.Parse(boundingbox[1]) < mLat || mxLng < double.Parse(boundingbox[2]) || double.Parse(boundingbox[3]) < mLng)
                 {
-                    Utilities.Log($"BoundingBox wasn't respected. Generating a location inside of the closest BoundingBox...", ConsoleColor.Yellow);
+                    Utilities.Log($"BoundingBox wasn't respected. Generating the closes location inside of the BoundingBox...", ConsoleColor.Yellow);
 
-                    double oldLat = lat;
-                    double oldLng = lng;
+                    double oldMLat = mLat;
+                    double oldMxLat = mxLat;
+                    double oldMLng = mLng;
+                    double oldMxLng = mxLng;
+                    double[] boxData = Utilities.ClosestSureArea(oldMLat, oldMxLat, oldMLng, oldMxLng, double.Parse(boundingbox[0]), double.Parse(boundingbox[1]), double.Parse(boundingbox[2]), double.Parse(boundingbox[3]));
+                    lat = boxData[0];
+                    lng = boxData[1];
 
-                    lat = Utilities.ClosestSureArea(oldLat, double.Parse(boundingbox[0]), double.Parse(boundingbox[1]), oldLng, double.Parse(boundingbox[2]), double.Parse(boundingbox[3]))[0];
-                    lng = Utilities.ClosestSureArea(oldLat, double.Parse(boundingbox[0]), double.Parse(boundingbox[1]), oldLng, double.Parse(boundingbox[2]), double.Parse(boundingbox[3]))[1];
-
-                    if (lat < mLat || lat > mxLat || lng < mLng || lng > mxLng)
+                    if (lat <= mLat || lat >= mxLat || lng <= mLng || lng >= mxLng)
                     {
                         if (oob)
                         {
@@ -89,10 +93,10 @@ namespace Geoguessr.Actions
                                         Console.Write(" - PUT ROAD COORDINATES (EVERY POINT THAT ROADS IS IN COUNTS)\n");
                                         Console.Write("Road Latitude Coordinate (type \"back\" to go back): ");
                                         string? cc = Console.ReadLine();
-                                        if (string.IsNullOrWhiteSpace(cc) || string.Equals(cc, "back", StringComparison.OrdinalIgnoreCase)) { continue; }
+                                        if (string.IsNullOrWhiteSpace(cc) || string.Equals(cc, "back", o)) { continue; }
                                         Console.Write("Road Longitude Coordinate (type \"back\" to go back): ");
                                         string? c2 = Console.ReadLine();
-                                        if (string.IsNullOrWhiteSpace(c2) || string.Equals(c2, "back", StringComparison.OrdinalIgnoreCase)) { continue; }
+                                        if (string.IsNullOrWhiteSpace(c2) || string.Equals(c2, "back", o)) { continue; }
 
                                         if (double.TryParse(cc, out double lat2) && double.TryParse(c2, out double lng2))
                                         {
@@ -100,7 +104,7 @@ namespace Geoguessr.Actions
                                             string response2 = Utilities.Get(streetURL2, Utilities.FakeAgent());
                                             JObject data2 = JObject.Parse(response2);
 
-                                            if (data2["address"] != null && data2["address"]["road"] != null && string.Equals(data2["address"]["road"].ToString(), data["address"]["road"].ToString(), StringComparison.OrdinalIgnoreCase))
+                                            if (data2["address"] != null && data2["address"]["road"] != null && string.Equals(data2["address"]["road"].ToString(), data["address"]["road"].ToString(), o))
                                             {
                                                 Utilities.Log("\n\nRIGHT!", ConsoleColor.Green, false);
                                                 Console.ReadKey();
@@ -108,7 +112,14 @@ namespace Geoguessr.Actions
                                             }
                                             else
                                             {
-                                                Utilities.Log($"\n\nWRONG! (You guessed (Press '1' to view road)", ConsoleColor.Red, false);
+                                                if (data2["address"] != null && data2["address"]["road"] != null)
+                                                {
+                                                    Utilities.Log($"\n\nWRONG! You have picked \"{data2["address"]["road"]}\" (Press '1' to view road)", ConsoleColor.Red, false);
+                                                }
+                                                else
+                                                {
+                                                    Utilities.Log($"\n\nWRONG! (Press '1' to view road)", ConsoleColor.Red, false);
+                                                }
                                                 ConsoleKeyInfo fKey = Console.ReadKey();
                                                 if (int.TryParse(fKey.KeyChar.ToString(), out int fChoice))
                                                 {
